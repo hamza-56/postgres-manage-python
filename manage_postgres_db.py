@@ -11,6 +11,7 @@ from tempfile import mkstemp
 import configparser
 import gzip
 import boto3
+from google.cloud import storage
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
@@ -36,7 +37,7 @@ def upload_to_s3(file_full_path, dest_file, manager_config):
 
 def download_from_s3(backup_s3_key, dest_file, manager_config):
     """
-    Upload a file to an AWS S3 bucket.
+    Download a file from an AWS S3 bucket.
     """
     s3_client = boto3.resource('s3')
     try:
@@ -46,8 +47,37 @@ def download_from_s3(backup_s3_key, dest_file, manager_config):
         exit(1)
 
 
+def upload_to_gcs(file_full_path, dest_file, manager_config):
+    """
+    Upload a file to an Google Cloud Storage bucket.
+    """
+    storage_client = storage.Client()
+    try:
+        bucket = storage_client.get_bucket(manager_config.get('GCS_BUCKET_NAME'))
+        blob = bucket.blob(manager_config.get('GCS_BUCKET_PATH') + dest_file)
+        blob.upload_from_filename(file_full_path)
+        os.remove(file_full_path)
+    except Exception as exc:
+        print(exc)
+        exit(1)
+
+
+def download_from_gcs(backup_file, dest_file, manager_config):
+    """
+    Download a file from Google Cloud Storage bucket.
+    """
+    storage_client = storage.Client()
+    try:
+        bucket = storage_client.get_bucket(manager_config.get('GCS_BUCKET_NAME'))
+        blob = bucket.blob(backup_file)
+        blob.download_to_filename(dest_file)
+    except Exception as e:
+        print(e)
+        exit(1)
+
+
 def list_available_backups(storage_engine, manager_config):
-    key_list = []
+    backup_list = None
     if storage_engine == 'LOCAL':
         try:
             backup_folder = manager_config.get('LOCAL_BACKUP_PATH')
@@ -62,10 +92,12 @@ def list_available_backups(storage_engine, manager_config):
         s3_objects = s3_client.list_objects_v2(Bucket=manager_config.get('AWS_BUCKET_NAME'),
                                                Prefix=manager_config.get('AWS_BUCKET_PATH'))
         backup_list = [s3_content['Key'] for s3_content in s3_objects['Contents']]
-
-    for bckp in backup_list:
-        key_list.append(bckp)
-    return key_list
+    elif storage_engine == 'GCS':
+        storage_client = storage.Client()
+        blobs = storage_client.list_blobs(manager_config.get('GCS_BUCKET_NAME'), 
+                                          prefix=manager_config.get('GCS_BUCKET_PATH'))
+        backup_list = [blob.name for blob in blobs]
+    return backup_list
 
 
 def list_postgres_databases(host, database_name, port, user, password):
@@ -309,6 +341,8 @@ def main():
     postgres_password = config.get('postgresql', 'password')
     aws_bucket_name = config.get('S3', 'bucket_name')
     aws_bucket_path = config.get('S3', 'bucket_backup_path')
+    gcs_bucket_name = config.get('GCS', 'bucket_name')
+    gcs_bucket_path = config.get('GCS', 'bucket_backup_path')
     storage_engine = config.get('setup', 'storage_engine')
     timestr = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     filename = 'backup-{}-{}.dump'.format(timestr, postgres_db)
@@ -320,6 +354,8 @@ def main():
     manager_config = {
         'AWS_BUCKET_NAME': aws_bucket_name,
         'AWS_BUCKET_PATH': aws_bucket_path,
+        'GCS_BUCKET_NAME': gcs_bucket_name,
+        'GCS_BUCKET_PATH': gcs_bucket_path,
         'BACKUP_PATH': '/tmp/',
         'LOCAL_BACKUP_PATH': local_storage_path
     }
@@ -364,6 +400,11 @@ def main():
             logger.info('Uploading {} to Amazon S3...'.format(comp_file))
             upload_to_s3(comp_file, filename_compressed, manager_config)
             logger.info("Uploaded to {}".format(filename_compressed))
+        elif storage_engine == 'GCS':
+            logger.info('Uploading {} to Google Cloud Storage...'.format(comp_file))
+            upload_to_gcs(comp_file, filename_compressed, manager_config)
+            logger.info("Uploaded to {}".format(filename_compressed))
+
     # restore task
     elif args.action == "restore":
         if not args.date:
@@ -391,6 +432,10 @@ def main():
             elif storage_engine == 'S3':
                 logger.info("Downloading {} from S3 into : {}".format(backup_match[0], restore_filename))
                 download_from_s3(backup_match[0], restore_filename, manager_config)
+                logger.info("Download complete")
+            elif storage_engine == 'GCS':
+                logger.info("Downloading {} from Google Cloud Storage into : {}".format(backup_match[0], restore_filename))
+                download_from_gcs(backup_match[0], restore_filename, manager_config)
                 logger.info("Download complete")
 
             logger.info("Extracting {}".format(restore_filename))
