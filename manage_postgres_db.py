@@ -347,8 +347,8 @@ def main():
     timestr = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     filename = 'backup-{}-{}.dump'.format(timestr, postgres_db)
     filename_compressed = '{}.gz'.format(filename)
-    restore_filename = '/tmp/restore.dump.gz'
-    restore_uncompressed = '/tmp/restore.dump'
+    restore_filename = config.get('setup', 'restore_filename')
+    restore_uncompressed = config.get('setup', 'restore_filename_uncompressed')
     local_storage_path = config.get('local_storage', 'path', fallback='./backups/')
 
     manager_config = {

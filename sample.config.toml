@@ -1,6 +1,8 @@
 [setup]
 # define if LOCAL, S3 OR GCS storage will be used when storing/restoring the backup
 storage_engine=GCS
+restore_filename=/tmp/restore.dump.gz
+restore_filename_uncompressed=/tmp/restore.dump
 
 [S3]
 bucket_name=db_backups.s3.my.domain.com
@@ -19,3 +21,5 @@ port=<your_psql_port(probably 5432)>
 db=<your_db_name>
 user=<your_username>
 password=<your_password>
+use_cloudsql_proxy=<true|false>
+instance_connection_name=<your_project>:<your_region>:<your_cloud_sql_instance>
